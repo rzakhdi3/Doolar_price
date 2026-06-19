@@ -1,13 +1,17 @@
 import os
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime
 
 def get_dollar_price():
-    """دریافت قیمت دلار از سایت"""
-    url = "https://www.tgju.org/profile/price_dollar_rl"
-    
+    """دریافت قیمت دلار از tgju.org"""
     try:
-        response = requests.get(url, timeout=10)
+        url = "https://www.tgju.org/profile/price_dollar_rl"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
         print(f"Status code: {response.status_code}")
         
         if response.status_code != 200:
@@ -16,41 +20,55 @@ def get_dollar_price():
             
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # جستجوی قیمت با سلکتورهای مختلف
-        price_element = soup.select_one('span[data-col="info.last_trade.PDrCotVal"]')
+        # جستجو با سلکتورهای مختلف
+        selectors = [
+            'span.info-price',
+            'span[class*="price"]',
+            'div.info-price',
+            'span.last-price'
+        ]
+        
+        price_element = None
+        for selector in selectors:
+            price_element = soup.select_one(selector)
+            if price_element:
+                print(f"Found price with selector: {selector}")
+                break
         
         if not price_element:
-            price_element = soup.select_one('.info-table td')
-        
-        if price_element:
-            price_text = price_element.text.strip().replace(',', '')
-            print(f"Found price: {price_text}")
-            return int(price_text)
-        else:
-            print("Could not find price element")
+            print("Could not find price element with any selector")
+            print("Page title:", soup.title.string if soup.title else "No title")
             return None
-            
+        
+        price_text = price_element.text.strip()
+        print(f"Raw price text: {price_text}")
+        
+        # حذف کاماها و تبدیل به عدد
+        price_text = price_text.replace(',', '').replace('٬', '')
+        price = int(''.join(filter(str.isdigit, price_text)))
+        
+        print(f"Parsed price: {price}")
+        return price
+        
     except Exception as e:
-        print(f"Error getting price: {e}")
+        print(f"Error fetching dollar price: {e}")
         return None
 
 def read_last_price():
-    """خواندن قیمت قبلی از فایل"""
+    """خواندن آخرین قیمت ذخیره شده"""
     try:
         if os.path.exists('last_price.txt'):
             with open('last_price.txt', 'r') as f:
                 price = int(f.read().strip())
                 print(f"Last saved price: {price}")
                 return price
-        else:
-            print("No previous price found")
-            return None
+        return 0
     except Exception as e:
         print(f"Error reading last price: {e}")
-        return None
+        return 0
 
 def save_last_price(price):
-    """ذخیره قیمت جدید در فایل"""
+    """ذخیره قیمت فعلی"""
     try:
         with open('last_price.txt', 'w') as f:
             f.write(str(price))
@@ -64,84 +82,79 @@ def send_telegram_message(message):
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
     if not bot_token or not chat_id:
-        print("Error: Missing bot token or chat ID")
+        print("Error: Bot token or chat ID not found in environment variables")
         return False
     
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     
+    payload = {
+        'chat_id': chat_id,
+        'text': message,
+        'parse_mode': 'HTML'
+    }
+    
     try:
-        response = requests.post(url, json={
-            'chat_id': chat_id,
-            'text': message,
-            'parse_mode': 'HTML'
-        }, timeout=10)
-        
-        result = response.json()
-        print(f"Telegram response: {result}")
-        
-        if result.get('ok'):
-            print("Message sent successfully!")
-            return True
-        else:
-            print(f"Error sending message: {result.get('description')}")
-            return False
-            
+        response = requests.post(url, json=payload, timeout=10)
+        print(f"Telegram response: {response.text}")
+        return response.status_code == 200
     except Exception as e:
-        print(f"Error sending message: {e}")
+        print(f"Error sending telegram message: {e}")
         return False
 
 def main():
-    print("=== Dollar Price Bot Started ===")
+    print("Starting dollar price bot...")
+    print(f"Current time: {datetime.now()}")
     
-    # دریافت قیمت جدید
+    # دریافت قیمت فعلی
     current_price = get_dollar_price()
+    
     if not current_price:
-        print("Failed to get current price")
+        print("Failed to fetch current price")
         return
     
     # خواندن قیمت قبلی
     last_price = read_last_price()
     
-    # اگر قیمت قبلی وجود نداشت، این اولین اجراست
-    if last_price is None:
-        print("First run - sending initial price")
-        message = f"💵 قیمت فعلی دلار: {current_price:,} تومان"
-        if send_telegram_message(message):
-            save_last_price(current_price)
-        return
-    
-    # مقایسه قیمت‌ها
+    # بررسی تغییر قیمت
     if current_price == last_price:
-        print(f"Price unchanged: {current_price:,}")
-        print("No message sent")
+        print(f"Price unchanged: {current_price}")
         return
     
-    # محاسبه تغییر قیمت
-    price_diff = current_price - last_price
-    percent_change = (price_diff / last_price) * 100
-    
-    # آیکون بر اساس تغییر
-    if price_diff > 0:
-        icon = "📈"
-        change_text = "افزایش"
-    else:
-        icon = "📉"
-        change_text = "کاهش"
+    print(f"Price changed from {last_price} to {current_price}")
     
     # ساخت پیام
-    message = f"""{icon} <b>تغییر قیمت دلار</b>
+    if last_price and last_price > 0:
+        price_diff = current_price - last_price
+        percent_change = (price_diff / last_price) * 100
+        
+        change_icon = "📈" if price_diff > 0 else "📉"
+        
+        message = f"""
+💵 قیمت دلار به‌روز شد!
 
-💵 قیمت فعلی: {current_price:,} تومان
-📊 {change_text}: {abs(price_diff):,} تومان ({abs(percent_change):.2f}%)
-⏱ قیمت قبلی: {last_price:,} تومان"""
+قیمت فعلی: {current_price:,} ریال
+قیمت قبلی: {last_price:,} ریال
+تغییرات: {price_diff:,} ریال ({change_icon} {percent_change:.2f}%)
+
+🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+    else:
+        # اولین بار که قیمت دریافت میشه
+        message = f"""
+💵 قیمت دلار ثبت شد!
+
+قیمت فعلی: {current_price:,} ریال
+
+🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
     
-    print(f"Price changed: {last_price:,} → {current_price:,}")
-    
-    # ارسال پیام و ذخیره قیمت جدید
+    # ارسال به تلگرام
     if send_telegram_message(message):
+        print("Message sent successfully")
+        # ذخیره قیمت جدید
         save_last_price(current_price)
-    
-    print("=== Bot Finished ===")
+    else:
+        print("Failed to send message")
 
 if __name__ == "__main__":
     main()
