@@ -8,7 +8,7 @@ TELEGRAM_CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 
 def get_dollar_price():
     """Fetch dollar price in Rials from tgju.org"""
-    url = 'https://www.tgju.org/profile/price_dollar_rl'
+    url = 'https://www.tgju.org/'
     
     try:
         headers = {
@@ -19,35 +19,22 @@ def get_dollar_price():
         
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Try multiple selectors specifically for the main Rial price
-        selectors = [
-            'span.info-price',  # Main price display
-            'div[data-market-row] span[data-col="info.last_trade.PDrCotVal"]',
-            'span[data-col="info.last_trade.PDrCotVal"]',
-            'div.price-view span.price',
-        ]
+        # Find the dollar row in the main table
+        # Look for the row with data-market-row="price_dollar_rl"
+        dollar_row = soup.select_one('tr[data-market-row="price_dollar_rl"]')
         
-        price_text = None
-        found_selector = None
+        if not dollar_row:
+            print("Could not find dollar row")
+            return None
         
-        for selector in selectors:
-            element = soup.select_one(selector)
-            if element:
-                price_text = element.get_text(strip=True)
-                found_selector = selector
-                break
+        # Get the price from the last_trade column
+        price_element = dollar_row.select_one('td[data-col="info.last_trade.PDrCotVal"]')
         
-        if not price_text:
-            print("Could not find price with any selector")
-            print("Available elements:")
-            for sel in selectors:
-                elems = soup.select(sel)
-                print(f"  {sel}: {len(elems)} found")
-                if elems:
-                    print(f"    First element text: {elems[0].get_text(strip=True)}")
+        if not price_element:
+            print("Could not find price element")
             return None
             
-        print(f"Found price with selector: {found_selector}")
+        price_text = price_element.get_text(strip=True)
         print(f"Raw price text: {price_text}")
         
         # Remove commas and parse
