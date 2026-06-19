@@ -1,31 +1,50 @@
 import requests
 import os
-import re
+from bs4 import BeautifulSoup
 
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 TELEGRAM_CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 
 def get_dollar_price():
-    """Fetch dollar price in Tomans from taban.ir API"""
-    url = 'https://api.taban.ir/v1/currency/usd'
+    """Fetch dollar price in Tomans from bonbast.com"""
+    url = 'https://bonbast.com'
     
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
         }
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
-        data = response.json()
-        print(f"API Response: {data}")
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        if 'data' in data and 'sell' in data['data']:
-            price = int(data['data']['sell'])
-            print(f"Parsed price (Tomans): {price:,}")
-            return price
-        else:
-            print("Could not find price in API response")
-            return None
+        # bonbast uses a table with currency data
+        # USD row has id or specific class
+        usd_row = soup.find('tr', {'data-name': 'usd'})
+        if not usd_row:
+            # fallback: find by searching for USD text
+            for row in soup.find_all('tr'):
+                cells = row.find_all('td')
+                if cells and 'USD' in row.get_text():
+                    usd_row = row
+                    break
+        
+        if usd_row:
+            cells = usd_row.find_all('td')
+            print(f"USD row cells: {[c.get_text(strip=True) for c in cells]}")
+            # sell price is typically the second price cell
+            for cell in cells:
+                text = cell.get_text(strip=True).replace(',', '')
+                if text.isdigit() and len(text) >= 5:
+                    price = int(text)
+                    print(f"Parsed price (Tomans): {price:,}")
+                    return price
+        
+        print("Could not find USD price row")
+        print(f"Page preview: {response.text[:500]}")
+        return None
         
     except Exception as e:
         print(f"Error fetching price: {e}")
@@ -49,8 +68,6 @@ def send_telegram_message(message):
         return True
     except Exception as e:
         print(f"Error sending Telegram message: {e}")
-        if hasattr(e, 'response') and e.response:
-            print(f"Response: {e.response.text}")
         return False
 
 def load_last_price():
@@ -79,7 +96,6 @@ def save_price(price):
 
 def main():
     print("Starting dollar price bot...")
-    print(f"Current time: {os.popen('date').read().strip()}")
     
     current_price = get_dollar_price()
     
@@ -108,20 +124,18 @@ def main():
                 emoji = "📉"
                 direction = "کاهش"
             
-            message = f"""{emoji} <b>تغییر قیمت دلار</b>
-
-💵 قیمت فعلی: {current_formatted} تومان
-📊 قیمت قبلی: {last_formatted} تومان
-{emoji} {direction}: {change_formatted} تومان
-📊 درصد تغییر: {percent_change:.2f}%
-
-🕐 {os.popen('date "+%Y-%m-%d %H:%M:%S"').read().strip()}"""
+            message = (
+                f"{emoji} <b>تغییر قیمت دلار</b>\n\n"
+                f"💵 قیمت فعلی: {current_formatted} تومان\n"
+                f"📊 قیمت قبلی: {last_formatted} تومان\n"
+                f"{emoji} {direction}: {change_formatted} تومان\n"
+                f"📊 درصد تغییر: {percent_change:.2f}%"
+            )
         else:
-            message = f"""💵 <b>قیمت دلار</b>
-
-قیمت فعلی: {current_formatted} تومان
-
-🕐 {os.popen('date "+%Y-%m-%d %H:%M:%S"').read().strip()}"""
+            message = (
+                f"💵 <b>قیمت دلار</b>\n\n"
+                f"قیمت فعلی: {current_formatted} تومان"
+            )
         
         if send_telegram_message(message):
             print("Message sent successfully")
