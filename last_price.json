@@ -1,5 +1,5 @@
 {
-    "usd_buy": 0,
-    "usd_sell": 0,
-    "usd_avg": 0
+  "buy": 0,
+  "sell": 0,
+  "average": 0
 }
