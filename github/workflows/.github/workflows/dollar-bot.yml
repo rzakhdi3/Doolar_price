@@ -2,7 +2,7 @@ name: Dollar Price Bot
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - - cron: '*/5 * * * *'  # هر 5 دقیقه یکبار
   workflow_dispatch:
 
 jobs:
