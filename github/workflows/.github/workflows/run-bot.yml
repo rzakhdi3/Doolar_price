@@ -1,4 +1,4 @@
-name: Price Check Bot
+name: Run Telegram Bot
 
 on:
   schedule:
@@ -10,29 +10,32 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      
+          python-version: '3.10'
+          
       - name: Install dependencies
-        run: pip install -r requirements.txt
-      
+        run: |
+          pip install -r requirements.txt
+          
       - name: Run bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python agent.py
-      
+        
       - name: Commit changes
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           git add last_prices.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update prices"
-          git push
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update last_prices.json"
+          
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
