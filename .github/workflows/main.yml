@@ -29,6 +29,8 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add last_prices.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update price history"
-          git push
+          if [ -f last_prices.json ]; then
+            git add last_prices.json
+            git diff --staged --quiet || git commit -m "Update price history"
+            git push
+          fi
