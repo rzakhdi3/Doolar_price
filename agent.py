@@ -1,149 +1,126 @@
 import requests
+import json
 import os
-from bs4 import BeautifulSoup
+from datetime import datetime
 
-TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
-TELEGRAM_CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
-
-def get_dollar_price():
-    """Fetch dollar price in Tomans from bonbast.com"""
-    url = 'https://bonbast.com'
-    
+def get_bonbast_prices():
+    """دریافت قیمت‌های خرید و فروش دلار از bonbast.com"""
     try:
+        url = "https://bonbast.com/json"
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        response = requests.get(url, headers=headers, timeout=15)
+        
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
+        data = response.json()
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+        buy_price = int(data.get('usd1', 0))
+        sell_price = int(data.get('usd2', 0))
         
-        # bonbast uses a table with currency data
-        # USD row has id or specific class
-        usd_row = soup.find('tr', {'data-name': 'usd'})
-        if not usd_row:
-            # fallback: find by searching for USD text
-            for row in soup.find_all('tr'):
-                cells = row.find_all('td')
-                if cells and 'USD' in row.get_text():
-                    usd_row = row
-                    break
-        
-        if usd_row:
-            cells = usd_row.find_all('td')
-            print(f"USD row cells: {[c.get_text(strip=True) for c in cells]}")
-            # sell price is typically the second price cell
-            for cell in cells:
-                text = cell.get_text(strip=True).replace(',', '')
-                if text.isdigit() and len(text) >= 5:
-                    price = int(text)
-                    print(f"Parsed price (Tomans): {price:,}")
-                    return price
-        
-        print("Could not find USD price row")
-        print(f"Page preview: {response.text[:500]}")
+        if buy_price > 0 and sell_price > 0:
+            return {
+                'buy': buy_price,
+                'sell': sell_price,
+                'average': (buy_price + sell_price) // 2
+            }
         return None
         
     except Exception as e:
-        print(f"Error fetching price: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"خطا در دریافت قیمت: {e}")
         return None
 
-def send_telegram_message(message):
-    """Send message to Telegram"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
+def send_telegram_message(bot_token, chat_id, message):
+    """ارسال پیام به تلگرام"""
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        data = {
+            'chat_id': chat_id,
+            'text': message,
+            'parse_mode': 'HTML'
+        }
+        
+        response = requests.post(url, data=data, timeout=10)
+        response.raise_for_status()
+        print("پیام با موفقیت ارسال شد")
+        return True
+        
+    except Exception as e:
+        print(f"خطا در ارسال پیام: {e}")
+        return False
+
+def load_last_prices():
+    """بارگذاری آخرین قیمت‌های ذخیره شده"""
+    try:
+        if os.path.exists('last_prices.json'):
+            with open('last_prices.json', 'r') as f:
+                return json.load(f)
+    except:
+        pass
+    return None
+
+def save_prices(prices):
+    """ذخیره قیمت‌های جدید"""
+    try:
+        with open('last_prices.json', 'w') as f:
+            json.dump(prices, f)
+    except Exception as e:
+        print(f"خطا در ذخیره قیمت: {e}")
+
+def format_price(price):
+    """فرمت کردن قیمت با کاما"""
+    return f"{price:,}"
+
+def create_message(prices):
+    """ساخت پیام تلگرام"""
+    now = datetime.now().strftime("%Y/%m/%d - %H:%M:%S")
     
-    try:
-        response = requests.post(url, json=data, timeout=10)
-        response.raise_for_status()
-        print(f"Telegram response: {response.json()}")
-        return True
-    except Exception as e:
-        print(f"Error sending Telegram message: {e}")
-        return False
+    message = f"""
+💵 <b>قیمت دلار آمریکا (بازار آزاد)</b>
 
-def load_last_price():
-    """Load the last saved price from file"""
-    try:
-        if os.path.exists('last_price.txt'):
-            with open('last_price.txt', 'r') as f:
-                content = f.read().strip()
-                if content:
-                    return int(content)
-        return 0
-    except Exception as e:
-        print(f"Error loading last price: {e}")
-        return 0
+🔵 خرید: <b>{format_price(prices['buy'])}</b> تومان
+🔴 فروش: <b>{format_price(prices['sell'])}</b> تومان
+✅ معامله: <b>{format_price(prices['average'])}</b> تومان
 
-def save_price(price):
-    """Save price to file"""
-    try:
-        with open('last_price.txt', 'w') as f:
-            f.write(str(price))
-        print(f"Saved new price: {price:,}")
-        return True
-    except Exception as e:
-        print(f"Error saving price: {e}")
-        return False
+🕐 {now}
+"""
+    return message.strip()
 
 def main():
-    print("Starting dollar price bot...")
+    # دریافت توکن و chat_id از متغیرهای محیطی
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')
     
-    current_price = get_dollar_price()
-    
-    if current_price is None:
-        print("Failed to fetch current price")
+    if not bot_token or not chat_id:
+        print("خطا: TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID باید تنظیم شوند")
         return
     
-    last_price = load_last_price()
-    print(f"Last saved price: {last_price:,} Tomans")
+    print("در حال دریافت قیمت دلار...")
+    prices = get_bonbast_prices()
     
-    if last_price != current_price:
-        print(f"Price changed from {last_price:,} to {current_price:,} Tomans")
-        
-        current_formatted = f"{current_price:,}"
-        
-        if last_price and last_price > 0:
-            last_formatted = f"{last_price:,}"
-            change = current_price - last_price
-            change_formatted = f"{abs(change):,}"
-            percent_change = (change / last_price) * 100
-            
-            if change > 0:
-                emoji = "📈"
-                direction = "افزایش"
-            else:
-                emoji = "📉"
-                direction = "کاهش"
-            
-            message = (
-                f"{emoji} <b>تغییر قیمت دلار</b>\n\n"
-                f"💵 قیمت فعلی: {current_formatted} تومان\n"
-                f"📊 قیمت قبلی: {last_formatted} تومان\n"
-                f"{emoji} {direction}: {change_formatted} تومان\n"
-                f"📊 درصد تغییر: {percent_change:.2f}%"
-            )
-        else:
-            message = (
-                f"💵 <b>قیمت دلار</b>\n\n"
-                f"قیمت فعلی: {current_formatted} تومان"
-            )
-        
-        if send_telegram_message(message):
-            print("Message sent successfully")
-            save_price(current_price)
-        else:
-            print("Failed to send message")
+    if not prices:
+        print("خطا: نتوانستیم قیمت را دریافت کنیم")
+        return
+    
+    print(f"قیمت دریافت شد - خرید: {format_price(prices['buy'])}, فروش: {format_price(prices['sell'])}")
+    
+    # بررسی تغییر قیمت
+    last_prices = load_last_prices()
+    
+    if last_prices is None:
+        # اولین اجرا - پیام ارسال می‌شود
+        print("اولین اجرا - ارسال پیام...")
+        message = create_message(prices)
+        send_telegram_message(bot_token, chat_id, message)
+        save_prices(prices)
+    elif last_prices['buy'] != prices['buy'] or last_prices['sell'] != prices['sell']:
+        # قیمت تغییر کرده
+        print("قیمت تغییر کرده - ارسال پیام...")
+        message = create_message(prices)
+        send_telegram_message(bot_token, chat_id, message)
+        save_prices(prices)
     else:
-        print("Price hasn't changed, not sending message")
+        print("قیمت تغییری نکرده - پیامی ارسال نشد")
 
 if __name__ == "__main__":
     main()
